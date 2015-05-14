@@ -46,9 +46,9 @@ printplain:
 
     ret
    
-setbase1000:			; set DS and ES to kernel load segment
+setbase1000:			; set DS and ES to kernel load segment; 0x10000=(64k),距离栈底(0x20000)有64k
 
-    push  eax
+    push  eax                   ;使用了eax,需要在栈中保存，退出时再恢复。
     mov   ax,0x1000
     mov   es,ax
     mov   ds,ax
@@ -755,11 +755,11 @@ start_of_code:
 ; Have NOT verified processor's generatiion, yet
 ; -------------------------------------------------
 
-    cli 			; disable interrupts while manipulating stack
-    mov  ax,0x2000
+    cli 			; disable interrupts while manipulating stack ;由于中断处理中会使用堆栈，所以在设置堆栈之前需要禁止中断。
+    mov  ax,0x2000              ; 设置基地址为：0x20000=(128k),参照文档[X86低端1M内存分配]可知，落在自由使用内存区中。
     mov  ss,ax
-    mov  sp,0xfffc		; quad align at top of segment
-    sti
+    mov  sp,0xfffc		; quad align at top of segment ；栈大小为:0xffff=(64k),栈顶为0xfffc（按照四字节对齐），由于push指令先写入，后更新sp。
+    sti                         ;堆栈设置完成后，打开中断。
 
     call setbase1000		; set DS & ES to beginning of kernel
 
@@ -777,13 +777,13 @@ start_of_code:
     ;int  0x10
     ;no_mode_atboot:
 
-    mov  ax,0x0200              ; Set cursor position (0,0)
-    mov  bx,0x0000              ; To avoid two consecutive vga mode changes
-    mov  dx,0x0000
-    int  0x10
+    mov  ax,0x0200              ; Set cursor position (0,0)  ;AH=02,设置光标位置。
+    mov  bx,0x0000              ; To avoid two consecutive vga mode changes ;BH=页码
+    mov  dx,0x0000              ;DH=行,DL=列
+    int  0x10                   ;使用BIOS中断的显示服务0x10     ;加深理解参考intelde编程手册中关于int指令的说明。
 
-    push es
-    mov  ax,0xb800		; mode 0-6; et al
+    push es                     ;拷贝数据到显存显示。
+    mov  ax,0xb800		; mode 0-6; et al ;参考BIOS内存分布，0xb8000-0xc0000为CGA/EGA+ chroma text video buffer
     mov  es,ax
     mov  di,0
     mov  si,d80x25		; macro definition of start background
@@ -792,8 +792,8 @@ start_of_code:
     cld
 
   dfl1:
-    lodsb
-    stosw
+    lodsb                       ;ds:si-->al 拷贝数据到al
+    stosw                       ;每个点用两个字节表示。
     loop dfl1
 
     pop es
