@@ -810,16 +810,16 @@ start_of_code:
     call  print 		; string in kernel.asm
 
 
-; 386+ ?
+; 386+ ?                        ;检测的原理是基于intel的popf对保留标志位的处理（不改变保留标志位）而NT标志在386才引入。
 ; -------------------------------------------------
-   
+    ;0x4000=0100000000000000b(bit14),第十四位是NT标志位。
     pushf
     pop   ax
-    mov   dx,ax
-    xor   ax,0x4000
-    push  ax
-    popf
-    pushf
+    mov   dx,ax                ;初始值保存到dx中,不论你386或者是286，NT标志都为0
+    xor   ax,0x4000            ;设置为1
+    push  ax                   ;push ax, popf ;将修改后的值保存到flag
+    popf                       ;参见intel手册，popf不会修改保留标志位，在386前，NT属于保留标志。
+    pushf                      ;将flag中的值保存到ax
     pop   ax
     and   ax,0x4000
     and   dx,0x4000
