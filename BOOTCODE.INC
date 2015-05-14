@@ -850,8 +850,11 @@ start_of_code:
     xor   ebp,ebp
 
 
-; Flush keyboard controller
+; Flush keyboard controller     ;8042 keyboard controller; 更多关于8042的参考[doc/keyboard controller.pdf]
 ; -------------------------------------------------
+; read port 0x64: read status register
+; bit0: output register (60h) has data for system 
+; 该程序读取8042状态寄存器的内容，如果有输入数据，则读取数据，最大读取100字节，或者没有数据可读。
 
     mov   dx,100
   fl1:
@@ -885,7 +888,7 @@ start_of_code:
   vesaok2:
     mov   ax,[es:di+4]		; AH = major, AL = minor version
     mov   dx,ax
-    add   ax,48*256+48		; convert to ASCII
+    add   ax,48*256+48		; convert to ASCII        ;48=0x30='0'
     mov   [vervesa+19],ah	; replace x.x in string with numbers
     mov   [vervesa+21],al	; update offsets if string is modified
     mov   si,vervesa
