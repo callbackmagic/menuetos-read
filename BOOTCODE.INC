@@ -1518,50 +1518,54 @@ end if ;; boot_media=0
     mov   dx,0x3f2	      ; Floppy motor off (don't depend on BIOS timer)
     mov   al,0
     out   dx,al
-
-; Paging table
+; ---------------------------设置页表的内容。----------------------------------------------------------------------
+; Paging table, 
+; linear:0-8M: physical addr = linear;
+; linear:8M-12M: 8M===>LFB, 12M===>LFB+4M, 参见VESA标准。
+; 12M--64M:physical addr = linear
 
     push  word 0
     pop   es
-    mov   ecx,[es:0x9018]	; LFB address
+    mov   ecx,[es:0x9018]	; LFB address from vesa
     push  ecx
 
-    map_mem equ 63		; Amount of memory to map
+    map_mem equ 63		; Amount of memory to map    ;总共映射了63M空间。
 
     mov   bx,0x6000
     mov   es,bx 		; [es:di] = 6000:0
     xor   edi,edi
-    mov   ecx,256*map_mem	; Map (mapmem) M
-    mov   eax,7
+    mov   ecx,256*map_mem	; Map (mapmem) M             ;256*4K=1M,即指256个表项可以映射1M内存空间。
+    mov   eax,7                 ; physical addr 0, attribute 7
     cld
   pt2:
     cmp   ecx,256*(map_mem-8)	  ; 8 M map to LFB
     jne   pt3
-    pop   eax
-    add   eax,7
+    pop   eax                     ;最开始的8M一一映射，然后从地址LFB开始映射。
+    add   eax,7                   ;attribute 7
   pt3:
     cmp   ecx,256*(map_mem-12)	  ; 12 M back to linear = physical
     jne   pt4
-    mov   eax,12*0x100000 + 7
+    mov   eax,12*0x100000 + 7     ;12M physical
   pt4:
     stosd
-    add   eax,4096
+    add   eax,4096               ;每个表项映射4K内存。
     loop  pt2
-
-; 4 kb paging
+; ---------------------------设置页目录表的内容。----------------------------------------------------------------------
+; 4 kb paging                     ;page table directory 保存在物理地址0x70000,设置64/4=16个表项，共可以映射64M内存空间。
 
     mov   bx , 0x7000
     mov   es , bx		  ; [es:di] = 7000:0
     xor   edi, edi
     mov   ecx, 64 / 4
-    mov   eax, 0x60007		  ; For 0 M
+    mov   eax, 0x60007		  ; For 0 M             ;页表开始地址在0x60000。
     cld
   pd4k:
     stosd
-    add   eax, 0x01000
+    add   eax, 0x01000            ;页表存放在连续的内存中，每个页表的大小为0x1000=4k
     loop  pd4k
     mov   eax, 0x70000 +8+16	; Page directory and enable caches
-    mov   cr3, eax
+    mov   cr3, eax              ;保存页目录表地址到cr3中。
+; ---------------------------设置页目录表的内容。----------------------------------------------------------------------
    
 ; Set standard graphics (mode 0x12 or 13)
 
