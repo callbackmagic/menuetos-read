@@ -46,7 +46,7 @@ printplain:
 
     ret
    
-setbase1000:			; set DS and ES to kernel load segment; 0x10000=(64k),距离栈底(0x20000)有64k
+setbase1000:			; set DS and ES to kernel load segment; 0x10000=(64k),距离栈底(0x20000)有64k; kernel被bootloader加载到0x10000,bootloader的代码不再当前工程中。
 
     push  eax                   ;使用了eax,需要在栈中保存，退出时再恢复。
     mov   ax,0x1000
@@ -203,18 +203,48 @@ U_DOT:
 
 ; --------------------------------------------------------------------------
 ; --------------------------------------------------------------------------
-
+;参见wikipedia int13   [http://en.wikipedia.org/wiki/INT_13H#INT_13h_AH.3D00h:_Reset_Disk_Drive]  
+;drive table DL=00H 1st floppy disk(floppy a)
+                                     DL =01H 2ed floppy disk(floppy b)
+				     DL=80H 1st hard disk
+				     DL=81H 2ed hard disk
 
 reset_floppy:		; use BIOS function, ignore any errors
     push ax
     push dx
-    xor ax,ax		; function 0
+    xor ax,ax		; function 0 reset drive
     xor dx,dx		; drive 0 (a:), only
     int 0x13
     pop dx
     pop ax
     ret
 
+;------------------------------read sectors---------------------------------
+;INT 13h AH=02h: Read Sectors From Drive
+;Parameters:
+;AH 	02h
+;AL 	Sectors To Read Count
+;CH 	Cylinder
+;CL 	Sector
+;DH 	Head
+;DL 	Drive
+;ES:BX 	Buffer Address Pointer
+
+;Results:
+;CF 	Set On Error, Clear If No Error
+;AH 	Return Code
+;AL 	Actual Sectors Read Count
+
+;Remarks:
+;Register CX contains both the cylinder number (10 bits, possible values are 0 to 1023) and the sector number (6 bits, possible values are 1 to 63). 
+;Cylinder and Sector bits are numbered below:
+
+;CX =       ---CH--- ---CL---
+;cylinder : 76543210 98
+;sector   :            543210
+;---------------------------------------------------------------------------
+ 
+;返回值：CF, set on error.
 ; cl high (7-6) + ch (7-0) = cylinder, cl low (5-0) = start sector
 ; al = number of sectors,  dh = side/head, es:bx = buffer location
 ; programmer must watch BIOS limits, some cannot cross track (or side) boundary
@@ -237,7 +267,7 @@ rd_sectors:
     pop ax
     ret
 
-; --------------------------------------------------------------------------
+; --------------------------------------------------------------------------        ;请找FAT格式，OBR，DBR
 ; Floppy parameters -- variables match size and order of those found on 
 ; floppy MBR.  Values will be changed from default ones
 ; --------------------------------------------------------------------------
@@ -251,7 +281,7 @@ sectorsperfat:		dw	14	; sectors / map - 22
 sectorspertrack:	dw	18	; sectors / track - 24
 n_heads:		dw	2	; number of heads (sides) - 26
 hiddensectors:		dd	0	; hidden sectors (dd) - 28
-totalsectors:		dd	2880	; sectors / disk - 32
+totalsecors:		dd	2880	; sectors / disk - 32
 ; --------------------------------------------------------------------------
 ; Calculated values based on above.  Default bytes per directory entry.
 ; --------------------------------------------------------------------------
@@ -292,20 +322,20 @@ get_floppy_params:
     mov si,bx
     add si,11			; skip over jump & oem
     mov di,bytespersector
-    mov cx,4			; 4 words = 8 bytes
+    mov cx,4			; 4 words = 8 bytes ;到maxrootentries为止。
     cld
     rep movsw
-    lodsw			; AX = small count
+    lodsw			; AX = small count  ;参见FAT说明，有两个位置保存了总扇区数。
     inc si			; skip media descriptor
-    mov cx,7
+    mov cx,7                    ;from sectorsperfat to totalsecors
     cld
-    rep movsw
+    rep movsw                   
     pop ds
     mov dx,[totalsectors]	; ensure large/total contains number of sectors
-    or	dx,[totalsectors+2]
-    jnz resume_params1
-    cmp ax,0
-    jg	set_total
+    or	dx,[totalsectors+2]     ; 2880=0x0B40,需要一个字即可保存。
+    jnz resume_params1          ; 四字节的总扇区数是否设置，如果没有，则根据small count，做出选择。
+    cmp ax,0                    ; small count=0,则采用默认值。
+    jg	set_total              
     mov ax,2880
   set_total:
     mov [totalsectors],ax
@@ -313,14 +343,14 @@ get_floppy_params:
   resume_params1:
     mov ax,[maxrootentries]	; calculate number of root directory sectors
     mov cx,[bytesperentry]
-    mul cx
+    mul cx                      ;计算出root entry需要的字节数，保存到ax
     mov cx,[bytespersector]	; PCDOS requires an exact fit (no rounding)
-    cmp cx,0
+    cmp cx,0                    ;如果值不正确，则采用默认值。
     jg	resume_params2
     mov cx,512
     mov [bytespersector],cx
   resume_params2:
-    div cx
+    div cx                      ;计算出root entries需要的扇区数。
     mov [root_sectors],ax
 
     xor dx,dx			; calculate number of cylinders
@@ -340,7 +370,7 @@ get_floppy_params:
     mov [n_heads],cx
   resume_params4:
     div cx
-    mov [maxcylinders],ax
+    mov [maxcylinders],ax       ;计算出总共有多少簇。
 
     mov ax,[ressectors] 	; calculate start of 1st FAT
     add ax,[hiddensectors]
@@ -465,10 +495,10 @@ read_file:
     mov si,cx			; protect the first cluster number
 
     mov cx,[bytespersector]	; ensure NOT 0 in table (above)
-    jcxz rd_rtn_error
+    jcxz rd_rtn_error           ; jump on cx zero
     dec cx			; round up
     add ax,cx			; sectors = (total bytes + bytes/sector - 1) / bytes/sector
-    adc dx,0
+    adc dx,0                    ; dx:ax = total bytes + bytes/sector -1;
     inc cx
     div cx			; AX = whole sectors
     cmp ax,0			; any?
@@ -500,9 +530,9 @@ read_file:
     xor dx,dx
     mov dl,[sectorspercluster]
     mov di,dx
-    mul di
+    mul di              ;stor to ax=di*al
     mov di,16		; bytes/paragraph
-    div di
+    div di              ; al<---quotient,ah<---remainder
     mov di,ax		; save paragraphs per cluster in DI for segment increment
     mov ax,si		; first cluster in AX
 
@@ -816,7 +846,7 @@ start_of_code:
     pushf
     pop   ax
     mov   dx,ax                ;初始值保存到dx中,不论你386或者是286，NT标志都为0
-    xor   ax,0x4000            ;设置为1
+    xor   ax,0x4000            ;反转NT位。
     push  ax                   ;push ax, popf ;将修改后的值保存到flag
     popf                       ;参见intel手册，popf不会修改保留标志位，在386前，NT属于保留标志。
     pushf                      ;将flag中的值保存到ax
@@ -877,13 +907,13 @@ start_of_code:
     push  word 0
     pop   es
     mov   ax,0x4f00		; VESA BIOS function (get BIOS info, if function available)
-    mov   di,0xa000
+    mov   di,0xa000             ; VESA 信息存储在ES：DI中。0xa000=40k;
     int   0x10
     cmp   ax,0x004f
     je	  vesaok2
     mov   si,novesa		; print with left border
     call  print
-    mov   ax,16
+    mov   ax,16                 ;why?
     jmp   novesafound
   vesaok2:
     mov   ax,[es:di+4]		; AH = major, AL = minor version
@@ -900,7 +930,7 @@ start_of_code:
 ; DS = ES should = beginning of kernel segment
 ; get the configuration file, if it exists
 ; -------------------------------------------------
-
+; 先读入引导区（MBR），获取软盘物理参数（c/h/s)和文件系统参数(fat),然后读入文件系统。
 if boot_media=0
 
     call reset_floppy
@@ -917,7 +947,7 @@ if boot_media=0
     push cx			; save counter
     mov dx,si			; save start pointer
     mov cx,11			; DOS (8.3) name
-    mov di,config_file
+    mov di,config_file          ;使用bochs调试，x/11bc ds:si,能够找到配置文件。
     repe cmpsb
     pop cx			; restore root entry counter
     mov si,dx			; restore directory pointer, beginning of this entry
@@ -928,9 +958,9 @@ if boot_media=0
     push es			; restore DS after searching all root entries
     pop  ds
   not_found:
-    mov ax,-1			; mark file as empty ("not found" or bad read)
-    mov [file_block+0x1C],ax
-    mov [file_block+0x1E],ax
+    mov ax,-1			; mark file as empty ("not found" or bad read) 
+    mov [file_block+0x1C],ax    ;0x1c 	4 	文件大小
+    mov [file_block+0x1E],ax    ;
     jmp short search_end
 		
   file_found:			; SI points to beginning of directory entry
@@ -942,7 +972,7 @@ if boot_media=0
     pop  ds
     mov ax,[file_block+0x1C]	; low byte count
     mov dx,[file_block+0x1E]	; high
-    mov cx,[file_block+0x1A]	; CX = first file cluster
+    mov cx,[file_block+0x1A]	; CX = first file cluster; [0x1a 	2 	FAT12和FAT16中的第一个簇。FAT32中第一个簇的两个低字节。]
     push word 0 		; load configuration file into bottom of memory
     pop es
     mov bx,0x4400		; Put configuration file into a temporary buffer
