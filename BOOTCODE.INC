@@ -78,7 +78,7 @@ getkey:
     pop   ebp edi esi edx ecx ebx
     mov   cl,al
    
-    add   al,47 		; scan code 1 to 0xa = number '2' to '9'
+    add   al,47 		; scan code 1 to 0xa = number '2' to '9' ;1-0的 scan code是：0x02-0x0b
     mov   [keyinbs],al		; place in a temporary string with backspace
     mov   si,keyinbs		; overwrite previous value
     call  printplain
@@ -999,7 +999,7 @@ end if ;; boot_media=0
     mov  si,gr_mode		; list values for user
     call printplain
   gml0:
-    mov   ebx,0x0A01
+    mov   ebx,0x0A01            ;输入最大为0x0A,最小01
     call  getkey
     jmp short pre_graph2
   pre_graph1:
@@ -1013,9 +1013,9 @@ end if ;; boot_media=0
     jl	  gml0
     cmp   al,8			; VGA modes?
     jg	  sgml1
-    mov   si,ax
+    mov   si,ax                 ;获取的输入减1,从0开始的index。
     dec   si
-    shl   si,4
+    shl   si,4                  ;每个表项16字节，4个DW
     add   si,gr_table
     mov   bx,[si+0]
     mov   cx,[si+4]
@@ -1204,7 +1204,7 @@ end if ;; boot_media=0
 
   nov2:
     pop  es
-
+;check bpp in ax, only 24 or 32 supported.
   nov:				; test bits per pixel value
 				; DS = ES = beginning of kernel
     cmp   ax,24
