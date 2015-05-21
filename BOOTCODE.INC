@@ -59,29 +59,29 @@ setbase1000:			; set DS and ES to kernel load segment; 0x10000=(64k),距离栈�
 
 ; Returns representation of a single input character in AL
 ; On entry BH = max and BL = min values
-getkey:
-
+getkey:                        ;由于零的scan code = 1, 所以要获取输入零，bh中要设置为0xa
+    ;根据情况使用了两次printplain,由于keyinbs串中含有退格字符(8),所以第二次的输出会覆盖掉第一次的。
     push  ebx
     push  ecx
     push  edx
     push  esi
 
-    add   bx,0x0101
+    add   bx,0x0101            ;转化成scan code
     xor   eax,eax
 
   gk1:
 
     push  ebx ecx edx esi edi ebp
     mov   ax , 0x0000 ; read key, with wait
-    int   0x16
-    shr   ax , 8      ; scancode
+    int   0x16                          ;读取键盘输入，ah=scan code, al=ascii code;键盘输入的流程大概如下：键盘输入的是scan code,传输到主板的8042控制器，
+    shr   ax , 8      ; scancode        ;8042出发中断IRQ1,中断处理程序从8042中读取数据，存放到键盘输入缓冲区。（可以在bochs中通过x命令IRQ服务地址，然后通过u命令查看对应的处理代码。
     pop   ebp edi esi edx ecx ebx
     mov   cl,al
    
     add   al,47 		; scan code 1 to 0xa = number '2' to '9' ;1-0的 scan code是：0x02-0x0b
     mov   [keyinbs],al		; place in a temporary string with backspace
     mov   si,keyinbs		; overwrite previous value
-    call  printplain
+    call  printplain            ;在屏幕上显示
 
     mov   al,cl
    
@@ -90,13 +90,13 @@ getkey:
     cmp   al,bh 		; above maximum - try again
     ja	  gk1
 
-    test  ebx,0x010000
+    test  ebx,0x010000          ;哪种情况？
     jnz   gk3
     mov   cx,0x1000
     mov   dx,cx
     add   ax,47
     mov   cx,ax
-    cmp   cx,58 		; 58 -> scan code 0xb -> key '0'
+    cmp   cx,58 		; 58 -> scan code 0xb -> key '0'           ;scan code(58)=0, 58-10=48='0'
     jb	  gk_nozero
     sub   cx,10 		; output '0' to '9'
   gk_nozero:
@@ -104,7 +104,7 @@ getkey:
     mov   si,keyin
     call  printplain
   gk3:
-    sub   ax,48 		; AX = 1 to 10
+    sub   ax,48 		; AX = 1 to 10                             ;ascii code to integer.
     pop   esi
     pop   edx
     pop   ecx
@@ -1012,10 +1012,10 @@ end if ;; boot_media=0
     cmp   al,1			; < 1 only if programmer error
     jl	  gml0
     cmp   al,8			; VGA modes?
-    jg	  sgml1
+    jg	  sgml1                 ;[1-8] vesa mode
     mov   si,ax                 ;获取的输入减1,从0开始的index。
     dec   si
-    shl   si,4                  ;每个表项16字节，4个DW
+    shl   si,4                  ;gr_table 每个表项占用16个字节。
     add   si,gr_table
     mov   bx,[si+0]
     mov   cx,[si+4]
@@ -1048,7 +1048,7 @@ end if ;; boot_media=0
   gml02:
     jmp   gml0			; problem - try manual input (again)
   gr_table:
-    dd	  0x112+0100000000000000b ,  640 ,  480 , 0
+    dd	  0x112+0100000000000000b ,  640 ,  480 , 0             ;if vesa 2.0+ then 14bit = 1
     dd	  0x115+0100000000000000b ,  800 ,  600 , 0
     dd	  0x118+0100000000000000b , 1024 ,  768 , 0
     dd	  0x11B+0100000000000000b , 1280 , 1024 , 0
@@ -1084,7 +1084,7 @@ end if ;; boot_media=0
     pop  es
     pop  cx
 
-; Default graphics or probe ? (probe VESA 2+ only)
+; Default graphics or probe ? (probe VESA 2+ only) ;根据配置文件或者键盘输入决定是否probe
 
     ; bx - mode|probe : cx - x size : dx - y size
 
@@ -1096,7 +1096,7 @@ end if ;; boot_media=0
     mov  si,probe_entry 	; configuration string
     call get_config
     pop  ebx
-    cmp  al,0
+    cmp  al,0                   ;配置文件中是否包含probe
     je	 askprobe
 
     push eax
@@ -1108,7 +1108,7 @@ end if ;; boot_media=0
     je	 noprobe
     jmp short start_probe
 
-  askprobe:
+  askprobe:                    ;从键盘获取是否probe
     mov   si,probetext
     call  printplain
     push  bx
@@ -1118,9 +1118,9 @@ end if ;; boot_media=0
     cmp   al,1
     je	  noprobe
 
-  start_probe:
+  start_probe:                  ;ok, do probe
     push es
-    push cx
+    push cx                     ; push XResolution
     push word 0			; Shared data segment
     pop  es
 
@@ -1137,7 +1137,7 @@ end if ;; boot_media=0
 
     jmp   $			; Fatal - probe allowed, requested and failed
 
-  probemore:
+  probemore:                    ;关于vbe更多消息参见doc/vbe3.pdf
 
     mov   ax,0x4f01		; VESA BIOS (get mode info)
     mov   cx,bx
@@ -1147,11 +1147,11 @@ end if ;; boot_media=0
     test ah,0xff		; 'set' call failed?
     jnz  newprobe
 
-    mov   eax,[es:di]		; Lfb ?
+    mov   eax,[es:di]		; Lfb ?                     ;es:di:dw mode attributes,d7:linear frame buffer mode is available?
     test  eax,10000000b		; test bit 7
     jz	  newprobe		; no, try next mode
 
-    mov   eax,[es:di+0x12]	; X size ?
+    mov   eax,[es:di+0x12]	; X size ?                  ;XResolution, horizontal resolution in pixels or characters, pixels in graphics modes,characters in text modes.
     cmp   ax,word [esp]		; CX = number of X pixels
     jne   newprobe
 
@@ -1159,7 +1159,7 @@ end if ;; boot_media=0
     cmp   ax,dx
     jne   newprobe
 
-    movzx eax,byte [es:di+0x19]
+    movzx eax,byte [es:di+0x19] ;BitsPerPixel
     cmp   al,24
     jb	  newprobe
 
@@ -1177,7 +1177,7 @@ end if ;; boot_media=0
 
 ; Find Vesa 2.0 Lfb and Bpp
 
-  noprobe:
+  noprobe:                      ;(vesa && (cfg_no || get_key_no || ver1.2)) || (vesa2.0+ && probe)
    
     test bx,0x100		; VESA mode?
     jz   nov
@@ -1192,7 +1192,7 @@ end if ;; boot_media=0
     test ah,0xff		; 'set' call failed?
     jnz  nov2
 
-    mov   ecx,[es:di+0x28]	; v2.0 linear buffer (LFB)
+    mov   ecx,[es:di+0x28]	; v2.0 linear buffer (LFB)                    ;PhyBasePtr dd physical address for flat memory frame buffer(vesa 2.0 and above)
     mov   [es:0x9018],ecx
     movzx ax,byte [es:di+0x19]	; v1.2 bits per pixel (BPP)
     mov   [es:0x9000],ax
@@ -1231,13 +1231,13 @@ end if ;; boot_media=0
     mov   bx,[es:0x9008]
     pop   es
     test  bx,0100000000000000b  ; Not for LFB
-    jnz   nov12
+    jnz   nov12                 ; vesa 2.0+
     cmp   bx,0x13               ; Not for VGA mode 0x13
     je    nov12
     cmp   bx,0x12               ; Not for VGA mode 0x12
     je    nov12
 
-    push es
+    push es                     ;here vesa 1.2
     mov   ax,0x4f0A		; VESA BIOS (modifies ES and DI)
     mov   bx,0x0		; get protected mode interface table
     int   0x10
@@ -1294,7 +1294,7 @@ end if ;; boot_media=0
     pop  es
     mov   si,linef
     call  printplain
-
+; --------------------------------------end of graphics card configuration--------------------------------------
 ; Get mouse port
 
     mov  eax,0			; value to use if no configuration found
